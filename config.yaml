@@ -1,0 +1,23 @@
+# config.yaml
+
+rules:
+  naming_convention:
+    tool: flake8
+    threshold: 5
+
+  complexity:
+    tool: radon
+    threshold: 10
+
+  security:
+    tool: bandit
+    threshold: 1
+
+ai_review:
+  temperature: 0.2
+  max_comments: 10
+  min_confidence: 0.7
+
+auto_reject:
+  enabled: false
+  overall_threshold: 5
