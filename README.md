@@ -27,7 +27,7 @@ This repository provides a unified toolset for automatic Pull Request (PR) quali
 
 ## Architecture
 
-```mermaid
+```
 flowchart LR
     subgraph Local
       CLI[CLI Entry Point]\n      ReviewLib[reviewer.py]
