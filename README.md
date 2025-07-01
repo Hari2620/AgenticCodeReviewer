@@ -1,195 +1,270 @@
-# AI Code Reviewer & Optimizer (CLI)
+# AI Code Reviewer & Optimizer
 
-A command‑line tool that automates pull‑request quality gates by combining rule‑based linters with AI‑powered code review suggestions. Designed for seamless integration into existing workflows (local CLI, CI pipelines, or desktop apps), it catches style, complexity, and security issues while providing contextual, human‑like recommendations.
+This repository provides a unified toolset for automatic Pull Request (PR) quality gating, combining rule-based linters (Flake8, Radon, Bandit) with an AI-driven review via OpenAI's ChatCompletion API. It consists of:
+
+1. **CLI Application** (`cli.py`) for local/diff-based or repo/PR-based scanning.
+2. **Python Library** (`reviewer.py`) encapsulating rule-check and AI-review logic.
+3. **FastAPI Service** (`service.py`) exposing a REST endpoint for external integrations (e.g., WPF frontend).
+4. **Configuration** (`config.yaml`) driving thresholds, AI parameters, and auto-reject policies.
 
 ---
 
 ## Table of Contents
 
-- [Features & Capabilities](#features--capabilities)
-- [Architecture & AI Model](#architecture--ai-model)
-- [Technical Details](#technical-details)
-  - [OpenAI API Integration](#openai-api-integration)
-  - [Rule‑Based Tools](#rule-based-tools)
-  - [CLI Design & Extensibility](#cli-design--extensibility)
-- [Installation & Setup](#installation--setup)
-- [Usage](#usage)
-  - [Basic CLI](#basic-cli)
-  - [CI Integration](#ci-integration)
-  - [Output Formats](#output-formats)
+- [Architecture](#architecture)
+- [Components](#components)
+- [Data Flow](#data-flow)
 - [Configuration](#configuration)
-- [Billing & Cost Estimates](#billing--cost-estimates)
-- [Development & Contribution](#development--contribution)
-- [License](#license)
+- [CLI Usage](#cli-usage)
+- [REST API](#rest-api)
+- [Integration with WPF](#integration-with-wpf)
+- [Security & Guardrails](#security--guardrails)
+- [Deployment & Packaging](#deployment--packaging)
+- [Future Work](#future-work)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Features & Capabilities
+## Architecture
 
-- **Automated Quality Gate**: Combines flake8, radon (cyclomatic complexity), and Bandit (security) checks with AI-driven suggestions.
-- **AI Suggestions**: Uses OpenAI’s `gpt-4o-mini` model via ChatCompletion to provide human‑like feedback and confidence scoring.
-- **Configurable Thresholds**: Tune rule‑based and AI confidence thresholds in `config.yaml`.
-- **Multi‑File Support**: Accepts multiple diff files in one run; merges them into a unified report.
-- **CI/CD & GitHub Action**: Easy integration for auto‑commenting on PRs and gating merges.
-- **Output Options**: Console, Markdown file, JSON (future extension).
-- **Guardrails**: Confidence cutoff and max‑comment limits to prevent noise.
+```mermaid
+flowchart LR
+    subgraph Local
+      CLI[CLI Entry Point]\n      ReviewLib[reviewer.py]
+    end
 
----
+    subgraph ServiceHost
+      API[FastAPI Service]\n      ReviewLib2[reviewer.py]
+    end
 
-## Architecture & AI Model
+    CLI --> ReviewLib --> {Rule Check}
+    CLI --> ReviewLib --> {AI Review}
+    API --> ReviewLib2 --> {Rule Check}
+    API --> ReviewLib2 --> {AI Review}
 
-1. **Rule‑Based Engine**
+    subgraph Rule Check
+      Flake8
+      Radon
+      Bandit
+    end
 
-   - **Flake8**: Naming conventions and style.
-   - **Radon**: Cyclomatic complexity analysis.
-   - **Bandit**: Security vulnerability detection.
-
-2. **AI Review Engine**
-
-   - **Model**: `gpt-4o-mini` (OpenAI ChatCompletion API).
-   - **Prompt**: Custom prompt guiding the model to review diffs, suggest improvements, and end with `Confidence: X.YZ`.
-   - **Guardrails**: Parses the final confidence line, includes suggestions only above `min_confidence`.
-
-3. **Integration Layer**
-
-   - **Python CLI**: Built with `click` for command‑line parsing.
-   - **Post‑PR Comment**: Optional GitHub API integration via `requests`, using `GITHUB_TOKEN`.
-   - **Diff Handling**: Reads one or more diff files, processes them in-memory, writes temporary files for linters.
-
----
-
-## Technical Details
-
-### OpenAI API Integration
-
-- **Library**: Official `openai` Python SDK (v0.27+).
-- **Endpoint**: `openai.ChatCompletion.create(...)`.
-- **Authentication**: via `OPENAI_API_KEY` in `.env` or environment variable.
-- **Model Selection**: `gpt-4o-mini` for a balance of speed, cost, and capability.
-- **Error Handling**: Validates response structure, raises runtime errors on missing content or parse failures.
-
-### Rule‑Based Tools
-
-- **Flake8**: Invoked with `--diff` on a temporary diff file.
-- **Radon (cc)**: Analyzes complexity, filters functions above threshold.
-- **Bandit**: Run in text mode (`-f txt -q`), filters out JSON headers and progress logs.
-- **Subprocess Isolation**: Each tool runs in its own process with capture of stdout.
-
-### CLI Design & Extensibility
-
-- **Click**: Modular commands and decorators.
-- **Configurable**: `config.yaml` for tools, thresholds, AI settings, auto‑reject.
-- **Plugin‑Ready**: Future support for additional linters or language adapters by extending `run_rule_checks`.
-
----
-
-## Installation & Setup
-
-```bash
-# Clone the repo
-git clone https://github.com/your-org/ai-code-reviewer.git
-cd ai-code-reviewer
-
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate      # macOS/Linux
-.\.venv\Scripts\Activate.ps1 # Windows PowerShell
-
-# Install dependencies
-pip install -e .
-pip install radon bandit flake8
-
-# Configure API key
-echo "OPENAI_API_KEY=sk-..." > .env
-
-# Customize settings
-cp config.example.yaml config.yaml
-# Edit config.yaml thresholds, AI settings
+    subgraph AI Review
+      OpenAI[ChatCompletion API]
+    end
 ```
 
----
-
-## Usage
-
-### Basic CLI
-
-```bash
-# Single diff
-python -m reviewer.cli path/to/changes.diff
-
-# Multiple diffs + output file + auto-reject
-python -m reviewer.cli diff1.diff diff2.diff \
-  --auto-reject -o review_report.md
-```
-
-### CI Integration
-
-Include in GitHub Actions: auto‑comment on PRs and optionally fail checks:
-
-```yaml
-- run: |
-    git diff ${{ github.event.pull_request.base.sha }} ${{ github.sha }} -- '*.py' > pr.diff
-    python -m reviewer.cli pr.diff -o pr_report.md --auto-reject
-```
-
-### Output Formats
-
-- **Console**: Colorized Markdown.
-- **File**: Markdown report via `-o` flag.
-- **JSON**: (TBD) for dashboards.
+1. **CLI** and **Service** share the same core module (`reviewer.py`).
+2. **Rule Check** forks into three subprocess calls:
+   - **Flake8** for style/naming violations.
+   - **Radon** for cyclomatic complexity grades.
+   - **Bandit** for security issue scanning.
+3. **AI Review** calls the OpenAI API with the raw unified diff to produce human‐like suggestions plus a confidence score.
 
 ---
 
-## Configuration
+## Components
 
-See `config.yaml` for:
+### 1. `reviewer.py`
+
+- **Entry functions**:
+  - `run_rule_checks(diff, rules_cfg, repo_url=None, pr_number=None, base="main")`
+  - `run_ai_review(diff, ai_cfg)`
+  - `post_pr_comment(body)`
+- **Modes**:
+  - **Diff‐Only**: writes `diff` to `temp.diff`, runs `flake8 --diff`.
+  - **PR‐Mode**: shallow clones the target repo, fetches `refs/pull/<N>/head`, checks out a temp branch, diffs against `base`, runs full‐file linters.
+
+### 2. `cli.py`
+
+- Based on **Click** for argument parsing.
+- Supports:
+  - `--repo-url` + `--pr-number` + `--base-branch` → PR‐Mode.
+  - `diff_file` argument → Diff‐Only Mode.
+  - `-o/--output-file` to save markdown report.
+  - `--auto-reject` to exit non‐zero if total violations exceed threshold.
+
+### 3. `service.py`
+
+- **FastAPI** app exposing ``.
+- Accepts JSON `{ diff?, repo_url?, pr_number?, base? }`.
+- Returns flat JSON:
+  ```json
+  {
+    "naming_convention": [...],
+    "complexity": [...],
+    "security": [...],
+    "ai_comments": [...],
+    "ai_score": 0.87
+  }
+  ```
+
+### 4. `config.yaml`
 
 ```yaml
 rules:
   naming_convention:
     tool: flake8
-    threshold: 5
+    threshold: 0      # 0 = no limit
   complexity:
     tool: radon
-    threshold: 10
+    threshold: 0
   security:
     tool: bandit
-    threshold: 1
+    threshold: 0
 
-ai_review:
+a i_review:
   temperature: 0.2
   max_comments: 10
   min_confidence: 0.7
 
 auto_reject:
   enabled: false
-  overall_threshold: 3
+  overall_threshold: 0
+```
+
+- **Thresholds** cap per‐tool findings (0 means unlimited).
+- **AI parameters** tune GPT temperature and comment count.
+- **Auto‐reject** can enforce CI gate based on `overall_threshold`.
+
+---
+
+## Data Flow
+
+1. **Input**: Diff text (from CLI file or GitHub PR).
+2. **Rule Check**:
+   - Identify changed files (via `git diff --name-only`).
+   - Spawn subprocesses for each tool.
+   - Collect and threshold results.
+3. **AI Review**:
+   - Send unified diff in prompt.
+   - Parse out suggestions and confidence.
+4. **Output**:
+   - Markdown report (CLI).
+   - JSON payload (Service).
+
+---
+
+## CLI Usage
+
+```bash
+# Diff‐only mode:
+python -m reviewer.cli examples/sample_pr.diff -o report.md
+
+# PR‐Mode:
+python -m reviewer.cli \
+  --repo-url https://github.com/YourOrg/Repo.git \
+  --pr-number 5 \
+  --base-branch main \
+  -o report_pr.md
+```
+
+Report structure:
+
+```markdown
+# AI Code Quality Report
+
+## Rule-based Violations
+### naming_convention (N)
+- file:line:code  description
+
+### complexity (M)
+- file:func …
+
+### security (K)
+- file: issue_text
+
+## AI Suggestions
+- suggestion 1
+- suggestion 2
 ```
 
 ---
 
-## Billing & Cost Estimates
+## REST API
 
-- **OpenAI API**: \~200 tokens per PR review ⇒ \~\$0.0004 per review (@ \$0.002/1K tokens).
-- **Linters**: Free open‑source.
-- **CI/CD**: Free tier suffices for <2K monthly runs.
-- **Infra**: <\$50/month if self‑hosting or using cloud functions.
+```http
+POST /review HTTP/1.1
+Content-Type: application/json
 
-**ROI**: Developers save \~10 min per PR ⇒ at \$60/hr ⇒ \$10 saved ⇒ break‑even in 1–2 PRs.
+{
+  "repo_url": "https://github.com/YourOrg/Repo.git",
+  "pr_number": 5,
+  "base": "main"
+}
+```
+
+Response:
+
+```json
+{
+  "naming_convention": [...],
+  "complexity": [...],
+  "security": [...],
+  "ai_comments": [...],
+  "ai_score": 0.85
+}
+```
 
 ---
 
-## Development & Contribution
+## Integration with WPF
 
-- **Code style**: Black + Flake8. Run `black .` and `flake8 src/ tests/`.
-- **Testing**: Pytest; see `tests/test_reviewer.py`.
-- **Extending**: Add new tools in `run_rule_checks`, new output formats in `cli.py`.
-
-Contributions welcome! Please open issues or PRs in GitHub.
+1. **HTTP client** calls `POST /review`.
+2. **Deserialize** JSON into a C# model:
+   ```csharp
+   public class ReviewResult {
+     public List<string> NamingConvention { get; set; }
+     public List<string> Complexity { get; set; }
+     public List<string> Security { get; set; }
+     public List<string> AiComments  { get; set; }
+     public double AiScore { get; set; }
+   }
+   ```
+3. **Bind** lists to UI controls (ListView, DataGrid).
+4. **Display** AI comments and a visual pass/fail if `AiScore >= min_confidence`.
 
 ---
 
-## License
+## Security & Guardrails
 
-MIT © Hariram
+- **Read-only temp cleanup** handles Windows file locks via `os.chmod`.
+- **Timeouts/Circuit Breakers** can be added around OpenAI calls and subprocesses.
+- **Error handling** returns HTTP 500 with details; CI-mode posts comments only when `GITHUB_TOKEN` is set.
 
+---
+
+## Deployment & Packaging
+
+- **Dependencies** in `requirements.txt`:
+  ```
+  fastapi
+  uvicorn
+  click
+  pyyaml
+  python-dotenv
+  openai
+  flake8
+  radon
+  bandit
+  ```
+- **Publish** as a PyPI package via `pyproject.toml` metadata.
+- **Docker** image can wrap Uvicorn service for Kubernetes.
+
+---
+
+## Future Work
+
+- Multi-language support (Java, JavaScript) via language-specific linters.
+- In‐browser VSCode extension for inline diff reviews.
+- Slack/MS Teams bot for PR notifications.
+- Automated PR comments with GitHub Actions integration.
+
+---
+
+## Troubleshooting
+
+- ``** fails**: verify repo URL and PR number.
+- **Empty arrays** in diff-only mode: ensure your patch adds lint violations.
+- **AI parser errors**: confirm the model returns a `Confidence: X.YZ` line.
+
+---
