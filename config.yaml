@@ -3,15 +3,15 @@
 rules:
   naming_convention:
     tool: flake8
-    threshold: 5
+    threshold: 0
 
   complexity:
     tool: radon
-    threshold: 10
+    threshold: 0
 
   security:
     tool: bandit
-    threshold: 1
+    threshold: 0
 
 ai_review:
   temperature: 0.2
@@ -20,4 +20,4 @@ ai_review:
 
 auto_reject:
   enabled: false
-  overall_threshold: 5
+  overall_threshold: 0
