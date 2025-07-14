@@ -17,12 +17,12 @@ cfg = yaml.safe_load(open("config.yaml", encoding="utf-8"))
 app = FastAPI(title="AI Code Reviewer Service")
 
 
+# ---- Request & Response Models ----
 class ReviewRequest(BaseModel):
     diff: Optional[str] = None
     repo_url: Optional[str] = None
     pr_number: Optional[int] = None
     base: str = "main"
-
 
 class ReviewResponse(BaseModel):
     naming_convention: List[str]
@@ -31,7 +31,17 @@ class ReviewResponse(BaseModel):
     ai_comments:      List[str]
     ai_score:         float
 
+# NEW: Inline suggestion models
+class InlineSuggestionRequest(BaseModel):
+    fileName: str
+    line: str
+    lineNumber: int
+    fullFile: List[str]
 
+class InlineSuggestionResponse(BaseModel):
+    suggestedText: str
+
+# ---- Endpoints ----
 @app.post("/review", response_model=ReviewResponse)
 def review(req: ReviewRequest):
     try:
@@ -64,11 +74,10 @@ def review(req: ReviewRequest):
                     os.chmod(path, stat.S_IWRITE)
                     func(path)
                 shutil.rmtree(tmp_dir, onerror=on_rm_error)
-
         else:
             diff_text = req.diff or ""
 
-        # 2) Rule‐based checks
+        # 2) Rule-based checks
         rules = run_rule_checks(
             diff_text,
             cfg["rules"],
@@ -77,7 +86,7 @@ def review(req: ReviewRequest):
             base=req.base
         )
 
-        # 3) AI‐based review
+        # 3) AI-based review
         ai_comments, ai_score = run_ai_review(diff_text, cfg["ai_review"])
 
         # 4) Return a flat JSON
@@ -93,3 +102,37 @@ def review(req: ReviewRequest):
         raise HTTPException(500, detail=f"Git error: {cpe}")
     except Exception as e:
         raise HTTPException(500, detail=str(e))
+
+
+@app.post("/inline-suggestion", response_model=InlineSuggestionResponse)
+def inline_suggestion(req: InlineSuggestionRequest):
+    """
+    Returns an AI-powered suggestion for a specific line in a file.
+    """
+    try:
+        import openai
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        prompt = (
+            f"You are a senior Python code reviewer.\n"
+            f"Given the following file named '{req.fileName}', review line {req.lineNumber}:\n"
+            f"    {req.line}\n"
+            f"Here is the complete file context:\n"
+            + "\n".join(req.fullFile)
+            + "\n\n"
+            "Suggest an improved version of the given line, optionally with a helpful inline code comment. Respond ONLY with the suggested code."
+        )
+        response = openai.chat.completions.create(
+            model=cfg.get("ai_review", {}).get("model", "gpt-4o-mini"),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=cfg.get("ai_review", {}).get("temperature", 0.2),
+            max_tokens=100,
+        )
+        choice = response.choices[0]
+        message = getattr(choice, "message", None)
+        content = getattr(message, "content", None)
+        if not content:
+            raise HTTPException(status_code=500, detail="No suggestion returned from AI model.")
+        suggestion = content.strip()
+        return InlineSuggestionResponse(suggestedText=suggestion)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

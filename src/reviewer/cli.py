@@ -58,7 +58,7 @@ def main(repo_url, pr_number, base, diff_file, auto_reject, output_file):
         diff = open(diff_file, encoding="utf-8").read()
 
     else:
-        click.echo("❌ Provide either a DIFF_FILE or both --repo-url and --pr-number", err=True)
+        click.echo("Provide either a DIFF_FILE or both --repo-url and --pr-number", err=True)
         sys.exit(1)
 
     # 2) Rule-based checks
@@ -88,7 +88,7 @@ def main(repo_url, pr_number, base, diff_file, auto_reject, output_file):
     if output_file:
         with open(output_file, "w", encoding="utf-8") as f:
             f.write(report)
-        click.echo(f"✅ Report written to {output_file}")
+        click.echo(f"Report written to {output_file}")
 
     # 6) Post to GitHub in CI
     if os.getenv("GITHUB_TOKEN") and os.getenv("GITHUB_PR_NUMBER") and os.getenv("GITHUB_REPOSITORY"):
